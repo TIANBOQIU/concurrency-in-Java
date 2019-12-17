@@ -830,9 +830,40 @@ public String consume() throws InterruptedException {
 ```
 
 
-### producer consumer problem
+### producer consumer example
 
 ```java
+class ProducerConsumerExample {
+    private Lock lock = new ReentrantLock();
+    private Condition added = lock.newCondition();
+    private Condition removed = lock.newCondition();
 
+    public void produce() throws InterruptedException {
+        lock.lock();
+        try {
+            while (count == LIMIT) {
+                remove.await();
+            }
+            addData();
+            added.signal();
+        } finally {
+            lock.unlock();
+        }
+    }
+
+    public String consume() throws InterruptedException {
+        lock.lock();
+        try {
+            while (count == 0) { // queue is empty
+                added.await();
+            }
+            String data = getData();
+            removed.signal();
+            return data;
+        } finally {
+            lock.unlock();
+        }
+    }
+}
 
 ```
