@@ -1,3 +1,7 @@
+### Concurrency in Java
+
+> notes for https://www.youtube.com/watch?v=N0mMm5PF5Ow&list=PLhfHPmPYPPRk6yMrcbfafFGSbE2EPK_A6&index=10 series
+
 ### Out of order execution
 
 > Compiler, JVM, or CPU might change the order of instructions for performance
@@ -451,4 +455,384 @@ no peek method, no iterate method, perfect for direct handoffs
 ```
 
 
-###  
+###  ThreadLocal in Java
+
+```java
+public class UserService {
+    public static void main(String[] args) {
+        new Thread(() -> {
+        String birthDate = new UserService().birthDate(100);
+        System.out.println(birthDate);
+    }).start();
+    new Thread(() -> {
+        String birthDate = new UserService().birthDate(100);
+        System.out.println(birthDate);
+    }).start();
+
+    Thread.sleep(1000);
+    }
+
+    public String birthDate(int userId) {
+        Date birthDate = birthDateFromDB(userId);
+        SimpleDateFormat df = new SimpleDateFormat("yyyy-MM-dd");
+        return df.format(birthDate);
+    }
+}
+
+
+// if the number of threads is too large we will have a lot of duplicate SimpaleDateFormat obj that we can reuse to be more efficient in memory
+
+```
+
+> one solution of it could be use global variable that is shared among all threads, but the variable may not be thread-safe class
+
+> so we can use lock which slow performance
+
+
+```
+# ThreadLocal use case 1
+use a thread pool and each thread has its own local variable which will never have synchronization problem
+```
+
+> **ThreadLocal-1** Per thread instances for memory efficiency and thread-safety
+
+```java
+class ThreadSafeFormatter {
+    public static ThreadLocal<SimpleDateFormat> dateFormatter = new ThreadLocal<>(SimpleDateFormat) {
+        @Override
+        protected SimpleDateFormat initialValue() {
+            return new SimpleDateFormat("yyyy-MM-dd");
+        }
+
+        @Override
+        public SimpleDateFormat get() {
+            return super.get();
+        }
+    };
+}
+
+public class UserService {
+    public static void main(String[] args) {
+        // ...
+    }
+
+    public String birthDate(int userId) {
+        Date birthDate = birthDateFromDB(userId);
+        final SimpleDateFormat df = ThreadSafeFormatter.dateFormatter.get();
+        returnn df.format(birthDate);
+    }
+}
+
+
+```
+
+```java
+// example in Java8
+
+class ThreadSafeFormatter {
+    public static ThreadLocal<SimpleDateFormat> df = ThreadLocal.withInitial(() -> new SimpleDateFormat("yyyy-MM-dd"));    
+}
+
+public class UserService {
+    public static void main(String[] args) {
+        // ...
+    }
+
+    public String birthDate(int userId) {
+        Date birthDate = birthDateFromDB(userId);
+        final SimpleDateFormat df = ThreadSafeFormatter.df,get();
+        return df.format(birthDate);
+    }
+}
+
+```
+
+#### use case 2, Per thread context
+
+```
+still, synchronization is not required with ThreadLocal
+
+example : a request to a web server through multiple services, need to return the user
+
+```
+
+```java
+// 'passing' infomation without use a concurrent DS or lock
+// create a seperate class
+public class UserContextHolder {
+    public static ThreadLocal<User> holder = new ThreadLocal();
+}
+
+class Service1 {
+    public void process() {
+        User user = getUser();
+        UserContextHolder.holder.set(user); // set it for this thread (for other services in a row)
+    }
+}
+
+class Service2 {
+    public void process() {
+        User user = UserContextHolder.holder.get(); // get user for this thread
+    }
+}
+
+class Service3 {
+    public void process() {
+        User user = UserContextHolder.holder.get(); // get user for this thread
+    }
+}
+
+// last service, clean up
+class Service4 {
+    public void process() {
+        User user = UserContextHolder.holder.get();
+        UserContextHolder.holder.remove();
+    }
+}
+
+// feel it is a good practtice for web service
+```
+
+
+> can be delegate to frameworks like Spring
+
+
+### Phaser
+
+#### CountDownLatch
+
+```java
+class CountDownLatchExample {
+    public static void main(String[] args) throws InterruptedException {
+        ExecutorService executor = Executors.newFixedThreadPool(4);
+
+        CountDownLatch latch = new CountDownLatch(3);
+        executor.submit(new DependentService(latch));
+        executor.submit(new DependentService(latch));
+        executor.submit(new DependentService(latch));
+
+        latch.await();
+
+        System.out.println("All dependant services initialized");
+
+        // program initialized, perform other operations
+    }
+
+    public static class DependentService implements Runnable {
+
+        private CountDownLatch latch;
+        public DependentService(CountDownLatch latch) {
+            this.latch = latch;
+        }
+
+        @Override
+        public void run() {
+            // startup task, init
+            latch.countDown();
+            // continue w/ other operations
+        }
+    }
+}
+```
+
+
+#### CyclicBarrier example
+```java
+public static void main(String[] args) throws interruptedException {
+    ExecutorService executor = Executors.newFixedThreadPool(4);
+
+    CyclicBarrier barrier = new CyclicBarrier(3);
+    executor.submit(new Task(barrier));
+    executor.submit(new Task(barrier));
+    executor.submit(new Task(barrier));
+
+    Thread.sleep(2000);
+}
+
+public static class Task implements Runnable {
+    private CyclicBarrier barrier;
+    public Task(CyclicBarrier barrier) {this.barrier = barrier; }
+
+    @Override
+    public void run() {
+        while (true) {
+            try {
+                barrier.await();
+            } catch(InterruptedException | BrokenBarrierException e) {
+                e.printStackTrace();
+            }
+            // send meesgae to corresponding system
+        }
+    }
+}
+```
+
+
+### Phaser
+
+> similar to CountDownLatch and Cyclic Barrier
+
+```java
+public static void main(String[] args) {
+    ExecutorService executor = Executor.newFixedThreadPool(4);
+    Phaser phaser = new Phaser(3); // parties = 3
+    execuor.submit(new DependentService(phaser));
+    execuor.submit(new DependentService(phaser));
+    execuor.submit(new DependentService(phaser));
+
+    phaser.awaitAdvance(1); // phase = 1, block the main thread similar to await
+}
+
+// ...
+void run() {
+    // startup
+    phaser.arrive();
+}
+```
+
+```java
+public static void main(String[] args) {
+    ExecutorService executor = Executor.newFixedThreadPool(4);
+    Phaser phaser = new Phaser(3); // parties = 3
+    execuor.submit(new DependentService(phaser));
+    execuor.submit(new DependentService(phaser));
+    execuor.submit(new DependentService(phaser));
+
+    Thread.sleep(3000);
+}
+
+// ...
+void run() {
+    while (true) {
+        phaser.arriveAndAwaitAdvance(); // similar to barrier.await()
+        // send the message aat once 
+    }
+}
+```
+
+### native thread, aka kernel thread
+
+```
+thread is expensive 
+
+we want non-blocking IO
+
+-> Asynchrous API 
+```
+
+```java
+// Asynchronous API - Callbacks
+for (Integer id : employeeIds) {
+    CompletableFuture.supplyAsync(() -> fetchEmployee(id))
+    .thenApplyAsync(employee -> fetchTaxRate(employee))
+    .thenApplyAsync(taxRate -> calculateTax(taxRate))
+    .thenAcceptAsync(taxValue -> sendEmai(taxValue));
+}
+
+// while in sync API future.get() will block
+```
+
+
+### NIO
+
+listener based callbacks, the main thread is not blocked
+
+### Webflux in Spring 5 
+
+### project loom, light weight threads
+
+
+### Condition Class
+
+```
+thread-1 condition.await() -> into wait-sate(block)
+
+thread-2 condition.signal() -> all wait-state for this condition into runnale state
+
+```
+
+```java
+class ConditionClassExample {
+    private Lock lock = new ReentrantLock();
+    private Condition conditionMet = lock.newCondition();
+
+    public void method1() throws InterruptedException {
+        lock.lock();
+        try {
+            conditionMet.await(); // suspend here
+            // can now do ops <- resume here
+        } finally {
+            lock.unlock();
+        }
+    }
+
+    public void method2() {
+        lock.lock();
+        try {
+            // do some ops
+            conditionMet.signal();
+        } finally {
+            lock.unlock();
+        }
+    }
+}
+
+```
+
+> wait, notify in synchronized block 
+
+```java
+class WaitNotifyExample {
+    // sync on the same instance in this example
+    // only one thread can execute this part
+    public synchronized void execute() {
+        try {
+            monitor.wait(); // monitor could be any obj
+        } catch (InterruptedException e) {
+            System.out.println("Interrupted");
+        }
+    }
+
+    // notify thread waiting on the monitor
+    monitor.notify();
+    // notify all threads
+    monitor.notifyAll();
+}
+
+
+// 
+// also have signalAll()
+```
+
+
+> signalAll, wait-sets, fairness
+
+```
+JVM scheduling
+```
+
+
+### Spurious wake ups
+
+> perform await in loop always 
+
+```java
+public String consume() throws InterruptedException {
+    lock.lock();
+    try {
+        while (count == 0)
+            added.await();
+        return getDate();
+    } finally {
+        lock.unlock();
+    }
+}
+```
+
+
+### producer consumer problem
+
+```java
+
+
+```
