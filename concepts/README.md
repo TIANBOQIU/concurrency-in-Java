@@ -829,6 +829,7 @@ public String consume() throws InterruptedException {
 }
 ```
 
+## Lock's condition
 
 ### producer consumer example
 
@@ -867,3 +868,246 @@ class ProducerConsumerExample {
 }
 
 ```
+
+## Semaphore 
+
+```
+use case -#1
+restrict the number of concurrent calls from out application to a service (e.g. a slow service)
+
+
+
+```
+
+```java
+// unlimited calls example
+class Example {
+    public static void main(String[] args) {
+        ExecutorService service = Execuors.newFixedThreadPool(50);
+        IntStream.of(1000).forEach(i -> service.execute(new Task()));
+
+        service.shutdown();
+        service.awaitTermination(1, TimeUnit.MINUTES); // timeout
+    }
+
+    public static class implements Runnable {
+        @Override
+        public void run() {
+            // some processing 
+            // IO call to the slow request, this might be called 50 times concurrently
+            // rest of processing
+        }
+    }
+}
+
+```
+
+> use Semaphore to limit # of permits
+
+```
+# permits = 3
+thread-1 require(), permits--
+thread-2 require(), permits--
+thread-3 require(), permits--
+thread-4 require(), blocked
+
+thread-1 release(), permits++
+thread-4 unblocked(), permits--
+
+```
+
+```java
+class SemaphoreExample {
+    public static void main(String[] args) throws InterruptedException {
+        Semaphore semaphore = new Semaphore(3); // permits
+        ExecutorService service = Executors.newFixedThreadPool(50);
+        IntStream.of(1000).forEach(i -> service.execute(new Task(semaphore)));
+
+        service.shutdown();
+        service.awaitTermination(1, TimeUnit.MINUTES);
+    }
+
+    static class Task implements Runnable {
+        @Override
+        public void run() {
+            // some processing 
+            semaphore.acquire(); // will throw exception
+            // IO call to the slow service
+            semaphore.release();
+            // rest of processing
+        }
+    }
+}
+```
+
+> semaphore.acquire(); // will throw exception
+ replace into acquireUninterruptibly()
+
+
+```java
+// can take and release multiple permits but should be the same
+```
+
+> semaphore -> restrict / manage the use of limied resources
+
+### ReentrantLock
+```
+lock has extra features
+```
+
+
+```java
+// in case of that exception happens before unlock use try-finally
+
+private static ReentrantLock lock = new ReentrantLock();
+
+private static void accessResource() {
+    lock.lock();
+    try {
+        // access the resource
+    } finally {
+        lock.unlock();
+    }
+}
+
+```
+
+```java
+// reentrant-what?
+lock.lock();
+lock.lock(); // multiple lock called without calling unlock
+int number = lock.getHoldCount();
+lock.unlock();
+lock.unlock();
+
+
+// handle recursion
+class ReentrantLockExample {
+    private static ReentrantLock lock = new ReentrantLock();
+    private static void accessResource() {
+        lock.lock();
+        // update shared resource
+        if (someCondition()) {
+            accessResource(); // recursion, increse getHeldCount
+        }
+        lock.unlock();
+    }
+}
+
+// fair lock
+// in wait queue, 
+```
+
+```
+by default, lock is unfair, you can pass lock = new ReentrantLock(true) to make it fair so that the thread that have waited the longest amount of time will be unlock first
+
+# fair lock, equal chance for all threads but is slower because of the queue
+
+# unfair lock, more faster (higher throughput) but possible thread starvation (never unlock or wait a long time)
+```
+
+
+*tryLock*
+```java
+// tryLock
+class TryLockExample {
+    private static ReentrantLock lock = new ReentrantLock();
+
+    private static void accessResource() {
+        boolean lockAcquired = lock.tryLock();
+
+        if (lockAcquired {
+            try {
+                // access resource
+            } finally {
+                lock.unlock();
+            }
+        } else {
+            // do something else rather than block and wait for unlock
+        }
+    }
+}
+
+// boolean lockAcquired = lock.tryLock(5, TimeUnit.SECONDS);
+```
+
+
+### ReadAndWrite Lock
+```
+more efficient
+multiple owners of read-lock
+allowed to proceed to view
+
+threads which wanted to write/update go into wait state
+```
+
+```java
+class ReentrantReadWriteLockExample {
+    private ReentrantReadWriteLock lock = new ReentrantReadWriteLock();
+    private ReentrantReadWriteLock.ReadLock readLock= lock.readLock();
+    private ReentrantReadWriteLock.writeLock writeLock=
+    lock.writeLock();
+
+    private void readResource() {
+        readLock.lock();
+        // view resource
+        readLock.unlock();
+    }
+
+    private void writeResource() {
+        writeLock.lock();
+        // update resource
+        writeLock.unlock();
+    }
+
+    public static void main(String[] args) {
+        Thread t1 = new Thread(() -> obj.readResource());
+        t1.start();
+        Thread t2 = new Thread(() -> obj.readResource());
+        t2.start();
+        Thread t3 = new Thread(() -> obj.readResource());
+        t3.start();
+        Thread t4 = new Thread(() -> obj.readResource());
+        t4.start();
+    }
+}
+
+// good for frequent reads and infrequen writes
+```
+
+
+### Exchanger
+
+> SynchronousQueue -> direct handoff
+
+> Exchanger -> handoffs in both direction
+
+```
+thread-1 exchange
+thread-2 exchange
+
+
+// buffer
+
+producer-thread : full buffer <--exchange--> consumer-thread : empty buffer
+
+```
+
+### Data Integrity Issue
+
+> use lock, mutual exclusion
+
+```
+striped lock, group items
+
+Lock # = obj's hashcode % total number of locks
+```
+
+
+### Java fibers, project loom
+
+> light weight kB comparing to ~MB for thread
+
+> not in Java yet. we have Go(goroutines), Python (Trio), Kotlin(coroutines)
+
+> unblocking IO, mount and unmount
