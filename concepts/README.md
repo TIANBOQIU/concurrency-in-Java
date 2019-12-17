@@ -1111,3 +1111,202 @@ Lock # = obj's hashcode % total number of locks
 > not in Java yet. we have Go(goroutines), Python (Trio), Kotlin(coroutines)
 
 > unblocking IO, mount and unmount
+
+
+### spinlock
+
+> keep trying to acquire the lock without going into wait state (acquire the monitor) can also be synchronized keyword
+
+> aka busy-loop, busy-wait, spinning
+
+> efficient when lock is used for short time avoiding thread switch in CPU but will lose some CPU cycles
+
+
+
+
+## DeadLock
+
+```
+thread-1 acquired lock A and wait for lock B before unlock A
+thread-2 acquired lock B and wait for lock A before unlock B
+
+```
+
+
+```java
+class DeadLockBasics {
+    private Lock lockA = new ReentrantLock();
+    private Lock lockB = new ReentrantLock();
+
+    private void execute() {
+        new Thread(this::processThis).start();
+        new Thread(this::processThat).start();
+    }
+
+    // called by thread-1
+    public void processThis() {
+        lockA.lock();
+        // process resource A
+        lockB.lock();
+        // process resource B
+
+        lockA.unlock();
+        lockB.unlock();
+    }
+
+    // called by thread-2
+    public void processThat() {
+        lockB.lock();
+        // process resource B
+        lockA.lock();
+        // process resource A
+        lockA.unlock();
+        lockB.unlock();
+    }
+}
+```
+
+```java
+// why is not easy to spot the reason of dead lock
+/*
+ * possible use of lock internally or explicitly
+ */
+private void execute() throws InterruptedException {
+    Lock lock = new ReentrantLock();
+    lock.lock();
+
+    BlockingQueue queue = new ArrayBlockingQueue(16);
+    queue.take(); // use lock internally
+
+    Semaphore sem = new Semaphore(1);
+    sem.acquire();
+}
+
+public synchronized void process() {
+    // .. lock on this
+}
+
+public static synchronized int count() {
+    // .. lock on class
+}
+
+```
+
+> multiple types of lock and threads are everywhere
+
+> cpu schedules
+
+
+```
+can be more circular
+thread-1 A wait B
+thread-2 B wait C
+thread-3 C wait A
+```
+
+### Tools for that, Thread Dumps
+
+```
+jstack 11475 > ./out.txt
+
+kill -3 12704
+
+```
+
+> .. is waiting for some mutex
+
+> you can also use Java MXBean API
+```java
+private static void detectDeadLock() {
+    ThreadMXBean threadBean = ManagementFactory.getThreadMXBean();
+    long[] threadIds = threadBean.findDeadlockedThreads();
+    boolean deadLock = threadIds != null && threadIds.length > 0;
+    System.out.println("Deadlocks found: " + deadLock);
+}
+```
+
+> how to prevent
+
+**include a timeout for your lock**
+```java
+// try lock B, if can't relase A
+
+Lock lock = new ReentrantLock();
+boolean acquired = lock.tryLock(2, TimeUnit.SECONDS);
+
+BlockingQueue queueu = new ArrayBlockingQueue(16);
+queue.poll(2, TimeUnit.SECONDS);
+
+Semaphore sem = new Semaphore(1);
+sem.tryAcquire(2, TimeUnit.SECONDS);
+```
+
+**global ordering**
+```java
+// both acquire lock A first then lock B
+class PreventDeadLockExample {
+    private Lock lockA = new ReentrantLock();
+    private Lock lockB = new ReentrantLock();
+
+    private void execute() {
+        new Thread(this::processThis).start();
+        new Thread(this::processThat).start();
+    }
+
+    // called by thread-1
+    public void processThis() {
+        lockA.lock();
+        // process resource A
+        lockB.lock();
+        // process resource B
+
+        lockA.unlock();
+        lockB.unlock();
+    }
+
+    // called by thread-2
+    public void processThat() {
+        lockA.lock(); // change into same order as thread-1
+        // process resource A
+        lockB.lock();
+        // process resource B
+        lockA.unlock();
+        lockB.unlock();
+    }
+}
+
+
+// tricky wrong example
+// acc1 and acc2 actualy different in ordering for two threads
+
+private void transfer(Account acc1, Account acc2, int amount) {
+    synchronized (acc1) {
+        synchronized (acc2) {
+            acc1.deduct(amount);
+            acc2.add(acount);
+        }
+    }
+}
+
+public void execute() {
+    new Thread(this::transfer('A', 'B', 100)).start();
+    new Thread(this::transfer('B', 'A', 300)).start();
+}
+
+
+// solution
+private void transfer(Account from, Account to, BigDecimal amount) {
+    Account acc1 = getLarger(from, to);
+    Account acc2 = getSmaller(from, to);
+    synchronized (acc1) {
+        synchronized (acc2) {
+            from.deduct(amount);
+            to.add(acount);
+        }
+    }
+}
+```
+
+
+### Some asked questions
+
